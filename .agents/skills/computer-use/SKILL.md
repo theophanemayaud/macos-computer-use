@@ -1,9 +1,6 @@
 ---
 name: computer-use
-description: >-
-  See or operate a macOS GUI (Mail, Finder, System Settings, Unreal viewport, or
-  any other window) via the computer-use MCP: screenshot plus accessibility tree,
-  then click/type/scroll. Use when the task needs a real GUI.
+description: Operate a macOS GUI via the computer-use MCP.
 ---
 
 # computer-use
@@ -12,12 +9,14 @@ MCP `computer-use` talks to a **signed helper .app** on macOS. It is a set of pr
 
 ## Tools
 
-| Tool | What it is for |
-|---|---|
-| `list_apps` | Windows, including other Spaces. `on_screen: false` = other Space or fully covered |
-| `get_app_state` | Picture + numbered controls for one window (`app` = owner or title substring). Does not raise it |
-| `click` / `scroll` / `type_text` / `press_key` / `set_value` / `perform_secondary_action` | Drive that window. Prefer `element_index` from the last tree. No start/stop session |
-| `isolate_window` | Raise or fullscreen. This **does** come to the front and may change Space; it stays front |
+
+| Tool                                                                                      | What it is for                                                                                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `list_apps`                                                                               | Windows, including other Spaces. `on_screen: false` = other Space or fully covered               |
+| `get_app_state`                                                                           | Picture + numbered controls for one window (`app` = owner or title substring). Does not raise it |
+| `click` / `scroll` / `type_text` / `press_key` / `set_value` / `perform_secondary_action` | Drive that window. Prefer `element_index` from the last tree. No start/stop session              |
+| `isolate_window`                                                                          | Raise or fullscreen. This **does** come to the front and may change Space; it stays front        |
+
 
 There is no launch-app tool. If nothing is running, `open -g -a "App Name"` starts it **without** bringing it forward (you stay on this Space). Plain `open -a` activates the app and macOS will switch to that app’s Space if it already has a window there.
 
@@ -34,7 +33,7 @@ Screenshot x,y is posted to that app (not a real mouse move) when the window is 
 - **Two lists.** The picture is a window id; the tree is what that app exposes. Recapture the window you mean.
 - **New windows appear on the current Space.** Drive that window or close it.
 - **List rows** often have no button action. Selecting the row is what works.
-- **`scroll` needs `element_index`** (the list, scroll area, web area, or a row inside it). If paging cannot move the view, `perform_secondary_action` `AXScrollToVisible` brings a node already in the tree into sight.
+- `scroll` **needs** `element_index` (the list, scroll area, web area, or a row inside it). If paging cannot move the view, `perform_secondary_action` `AXScrollToVisible` brings a node already in the tree into sight.
 - **Text:** `set_value` for real fields. For a web area, click it then `type_text`.
 - **Popup menus** draw on the Space you are looking at, even if the parent window is elsewhere. Opening one is visible here. After `AXPress` on a popup, pick the item **before** the next `get_app_state` — a recapture closes the menu.
 - A **black picture** usually means you captured a helper process, not the window that painted. Recapture the host window.
