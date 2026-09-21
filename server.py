@@ -433,6 +433,10 @@ def tool_get_app_state(args: dict[str, Any]) -> dict[str, Any]:
 
 def tool_click(args: dict[str, Any]) -> dict[str, Any]:
     win = _last.get("window")
+    if args.get("global") and args.get("element_index") is not None:
+        raise RuntimeError(
+            "global click needs x,y: it moves the real pointer, so there is no element_index path"
+        )
     if args.get("element_index") is not None:
         if not win:
             win = _match_window(args.get("app"))
@@ -452,23 +456,26 @@ def tool_click(args: dict[str, Any]) -> dict[str, Any]:
     sx, sy, win = _map_click(args["x"], args["y"])
     button = str(args.get("mouse_button") or args.get("button") or "left")
     count = int(args.get("click_count") or args.get("count") or 1)
-    _helper(
-        [
-            "click",
-            "--x",
-            str(sx),
-            "--y",
-            str(sy),
-            "--button",
-            button,
-            "--count",
-            str(count),
-            "--pid",
-            str(int(win["pid"])),
-        ]
-        + _ax_win_args(win)
-    )
-    return _text(json.dumps({"ok": True, "screen": [round(sx, 1), round(sy, 1)]}))
+    cmd = [
+        "click",
+        "--x",
+        str(sx),
+        "--y",
+        str(sy),
+        "--button",
+        button,
+        "--count",
+        str(count),
+        "--pid",
+        str(int(win["pid"])),
+    ]
+    if args.get("global"):
+        cmd += ["--global"]
+    cmd += _ax_win_args(win)
+    out = _helper(cmd, timeout=15)
+    result = json.loads(out.strip() or "{}")
+    result.setdefault("screen", [round(sx, 1), round(sy, 1)])
+    return _text(json.dumps(result))
 
 
 def tool_drag(args: dict[str, Any]) -> dict[str, Any]:
@@ -476,23 +483,24 @@ def tool_drag(args: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("Call get_app_state first.")
     x1, y1, win = _map_click(args["from_x"], args["from_y"])
     x2, y2, _ = _map_click(args["to_x"], args["to_y"])
-    _helper(
-        [
-            "drag",
-            "--from-x",
-            str(x1),
-            "--from-y",
-            str(y1),
-            "--to-x",
-            str(x2),
-            "--to-y",
-            str(y2),
-            "--pid",
-            str(int(win["pid"])),
-        ]
-        + _ax_win_args(win)
-    )
-    return _text('{"ok":true}')
+    cmd = [
+        "drag",
+        "--from-x",
+        str(x1),
+        "--from-y",
+        str(y1),
+        "--to-x",
+        str(x2),
+        "--to-y",
+        str(y2),
+        "--pid",
+        str(int(win["pid"])),
+    ]
+    if args.get("global"):
+        cmd += ["--global"]
+    cmd += _ax_win_args(win)
+    out = _helper(cmd, timeout=15)
+    return _text(out.strip() or '{"ok":true}')
 
 
 def tool_scroll(args: dict[str, Any]) -> dict[str, Any]:
@@ -614,7 +622,11 @@ TOOLS = {
     "click": {
         "description": (
             "Click an AX element_index (off-Space, no raise), or screenshot x,y posted to that app's pid "
-            "(also off-Space; does not move your pointer). HID real-pointer click only if pid is missing."
+            "(also off-Space; does not move your pointer). Set global=true to force the real-pointer path "
+            "instead: the captured window is raised first, and if it cannot be brought to this Space the "
+            "call fails without clicking. Use it only as a fallback when "
+            "a pid click had no effect (some native apps ignore pid-posted clicks), or when the user "
+            "explicitly wants control taken over. The result reports via=pid|hid|global."
         ),
         "schema": {
             "type": "object",
@@ -625,13 +637,18 @@ TOOLS = {
                 "app": {"type": "string"},
                 "mouse_button": {"type": "string", "enum": ["left", "right", "middle"]},
                 "click_count": {"type": "integer"},
+                "global": {"type": "boolean"},
             },
         },
         "fn": tool_click,
     },
     "drag": {
         "description": (
-            "Drag in last screenshot pixel space, posted to the target app pid (no real pointer)."
+            "Drag in last screenshot pixel space, posted to the target app pid (no real pointer). "
+            "Set global=true to force the real-pointer path: the captured window is raised first, and "
+            "if it cannot be brought to this Space the call fails without dragging. The pid path "
+            "cannot drive window-server drags (window moves, text "
+            "selection, Finder drag-and-drop), so use global for those. Reports via=pid|global."
         ),
         "schema": {
             "type": "object",
@@ -640,6 +657,7 @@ TOOLS = {
                 "from_y": {"type": "number"},
                 "to_x": {"type": "number"},
                 "to_y": {"type": "number"},
+                "global": {"type": "boolean"},
             },
             "required": ["from_x", "from_y", "to_x", "to_y"],
         },

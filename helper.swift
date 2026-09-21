@@ -68,6 +68,14 @@ func wantsActivate() -> Bool {
     flag("activate")
 }
 
+/// `--global` forces the real-pointer path for click/drag. It is the explicit
+/// opt-in to take control, so it bypasses the pid-directed path entirely: the
+/// pointer moves, the target app is raised first, and off-Space bounds are not
+/// enforced (the raise is what brings the window to the current Space).
+func wantsGlobal() -> Bool {
+    flag("global")
+}
+
 func keepTargetFront() -> Bool {
     flag("keep-target-front")
 }
@@ -383,6 +391,46 @@ func maybeActivate(pid: pid_t?) {
     guard wantsActivate(), let pid else { return }
     activate(pid: pid)
     usleep(80_000)
+}
+
+/// Raise the **captured** window, not the app's main window. `activate(pid:)`
+/// AX-raises `kAXMainWindowAttribute` and ignores `--wid`, so with a secondary
+/// window (or one app spread over several Spaces) the app comes forward while
+/// the target stays on another Space — and a real-pointer click at its
+/// coordinates then lands on whatever is visible here instead. Falls back to
+/// plain activation when there is no wid to target.
+func raiseTargetWindow(pid: pid_t, windowID: CGWindowID) {
+    guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return }
+    if windowID != 0 {
+        let axApp = AXUIElementCreateApplication(pid)
+        axEnableIfNeeded(axApp)
+        if let win = axCandidateWindows(axApp).first(where: { axCGWindowID($0) == windowID }) {
+            AXUIElementPerformAction(win, kAXRaiseAction as CFString)
+        }
+    }
+    // macOS 14+ : activateIgnoringOtherApps does nothing. activate(from:) is the replacement.
+    _ = app.activate(from: NSRunningApplication.current)
+    if NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+        _ = app.activate()
+    }
+}
+
+/// Take the screen for a global (real-pointer) action, and say whether we did.
+/// Global must own the screen, so unlike `maybeActivate` this does not wait for
+/// `--activate`: `--global` is itself the explicit opt-in. 200ms matches
+/// `isolateCmd`; a shorter wait let the click fire before the window was
+/// frontmost, so the first click only activated it.
+///
+/// Returns false when the app is not frontmost or the captured window is not on
+/// this Space. Callers must abort rather than post the event: this path skips
+/// the off-Space guard, so an unverified click hits an unrelated application.
+func takeControl(pid: pid_t?, windowID: CGWindowID) -> Bool {
+    guard let pid, pid != 0 else { return false }
+    raiseTargetWindow(pid: pid, windowID: windowID)
+    usleep(200_000)
+    let appFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    let windowHere = windowID == 0 || cgWindowIsOnScreen(windowID)
+    return appFront && windowHere
 }
 
 func targetWindowID() -> CGWindowID {
@@ -783,6 +831,18 @@ func hidClick(x: Double, y: Double, button: String, count: Int, pid: pid_t?) {
 }
 
 func click(x: Double, y: Double, button: String, count: Int, pid: pid_t?) throws {
+    if wantsGlobal() {
+        guard takeControl(pid: pid, windowID: targetWindowID()) else {
+            throw HelperError.failed(
+                "global click aborted: could not bring the captured window to this Space "
+                    + "(activation refused, focus changed, or the window is not visible here). "
+                    + "Nothing was clicked. Re-check with get_app_state, or use the pid/AX path."
+            )
+        }
+        hidClick(x: x, y: y, button: button, count: count, pid: pid)
+        try printJSON(["ok": true, "via": "global", "raised": true])
+        return
+    }
     if let pid, pid != 0 {
         ensureSyntheticKey(pid: pid)
         pidClick(x: x, y: y, button: button, count: count, pid: pid)
@@ -794,10 +854,36 @@ func click(x: Double, y: Double, button: String, count: Int, pid: pid_t?) throws
     try printJSON(["ok": true, "via": "hid"])
 }
 
+/// Real-pointer drag at `.cghidEventTap`. Shared by the no-pid path and `--global`.
+func hidDrag(from start: CGPoint, to end: CGPoint) {
+    let steps = 12
+    makeMouseEvent(.leftMouseDown, start, button: .left)?.post(tap: .cghidEventTap)
+    usleep(20_000)
+    for i in 1...steps {
+        let t = Double(i) / Double(steps)
+        let p = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+        makeMouseEvent(.leftMouseDragged, p, button: .left)?.post(tap: .cghidEventTap)
+        usleep(8_000)
+    }
+    makeMouseEvent(.leftMouseUp, end, button: .left)?.post(tap: .cghidEventTap)
+}
+
 func drag(fromX: Double, fromY: Double, toX: Double, toY: Double, pid: pid_t?) throws {
     let start = CGPoint(x: fromX, y: fromY)
     let end = CGPoint(x: toX, y: toY)
     let steps = 12
+    if wantsGlobal() {
+        guard takeControl(pid: pid, windowID: targetWindowID()) else {
+            throw HelperError.failed(
+                "global drag aborted: could not bring the captured window to this Space "
+                    + "(activation refused, focus changed, or the window is not visible here). "
+                    + "Nothing was dragged. Re-check with get_app_state, or use the pid path."
+            )
+        }
+        hidDrag(from: start, to: end)
+        try printJSON(["ok": true, "via": "global", "raised": true])
+        return
+    }
     if let pid, pid != 0 {
         ensureSyntheticKey(pid: pid)
         postMouse(.leftMouseDown, start, button: .left, clickCount: 1, pid: pid)
@@ -814,15 +900,7 @@ func drag(fromX: Double, fromY: Double, toX: Double, toY: Double, pid: pid_t?) t
     }
     try refuseHidOffspace(pid: pid)
     maybeActivate(pid: pid)
-    makeMouseEvent(.leftMouseDown, start, button: .left)?.post(tap: .cghidEventTap)
-    usleep(20_000)
-    for i in 1...steps {
-        let t = Double(i) / Double(steps)
-        let p = CGPoint(x: fromX + (toX - fromX) * t, y: fromY + (toY - fromY) * t)
-        makeMouseEvent(.leftMouseDragged, p, button: .left)?.post(tap: .cghidEventTap)
-        usleep(8_000)
-    }
-    makeMouseEvent(.leftMouseUp, end, button: .left)?.post(tap: .cghidEventTap)
+    hidDrag(from: start, to: end)
     try printJSON(["ok": true, "via": "hid"])
 }
 
