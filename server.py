@@ -662,8 +662,9 @@ TOOLS = {
             "Click an AX element_index, or screenshot x,y posted to that window's pid "
             "(off-Space; does not move your pointer). x,y come from get_app_state, so pass that "
             "call's window_id and image_px back with them — the server keeps no state. Set "
-            "global=true to force the real-pointer path instead: the window is raised first and "
-            "the mouse actually moves. Use it only as a fallback when a pid click had no effect "
+            "global=true to force the real-pointer path instead: the captured window is raised "
+            "first, and if it cannot be brought to this Space the call fails without clicking. "
+            "Use it only as a fallback when a pid click had no effect "
             "(some native apps ignore pid-posted clicks), or when the user explicitly wants "
             "control taken over. The result reports via=pid|hid|global."
         ),
@@ -687,9 +688,10 @@ TOOLS = {
         "description": (
             "Drag in get_app_state's screenshot pixels, posted to the window's pid (no real "
             "pointer). Pass window_id and image_px from that call; the server keeps no state. "
-            "Set global=true to force the real-pointer path: the window is raised first and the "
-            "mouse actually moves. The pid path cannot drive window-server drags (window moves, "
-            "text selection, Finder drag-and-drop), so use global for those. Reports via=pid|global."
+            "Set global=true to force the real-pointer path: the captured window is raised first, "
+            "and if it cannot be brought to this Space the call fails without dragging. The pid "
+            "path cannot drive window-server drags (window moves, text selection, Finder "
+            "drag-and-drop), so use global for those. Reports via=pid|global."
         ),
         "schema": {
             "type": "object",
