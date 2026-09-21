@@ -33,7 +33,7 @@ Screenshot x,y is posted to that app (not a real mouse move) when the window is 
 
 - **Two lists.** The picture is a window id; the tree is what that app exposes. Recapture the window you mean.
 - **New windows appear on the current Space.** Drive that window or close it.
-- **Nothing happened?** Some native apps (Qt, some AppKit windows) ignore pid-posted clicks and expose no usable AX tree, so both `element_index` and x,y clicks can silently no-op. If a `click`/`drag` had no effect, retry the same coordinates with `global: true` — that raises the app and uses the real mouse. Use it as a **fallback**, or when the user explicitly wants control taken over. The result's `via` says which path ran (`pid` / `hid` / `global`).
+- **Nothing happened?** Some native apps (Qt, some AppKit windows) ignore pid-posted clicks and expose no usable AX tree, so both `element_index` and x,y clicks can silently no-op. If a `click`/`drag` had no effect, retry the same coordinates with `global: true` — that raises the captured window and uses the real mouse. Use it as a **fallback**, or when the user explicitly wants control taken over. It **aborts with an error and clicks nothing** if it cannot bring the captured window to this Space, so a failure there means "not attempted", not "attempted and missed". The result's `via` says which path ran (`pid` / `hid` / `global`).
 - **List rows** often have no button action. Selecting the row is what works.
 - `scroll` **needs** `element_index` (the list, scroll area, web area, or a row inside it). If paging cannot move the view, `perform_secondary_action` `AXScrollToVisible` brings a node already in the tree into sight.
 - **Text:** `set_value` for real fields. For a web area, click it then `type_text`.

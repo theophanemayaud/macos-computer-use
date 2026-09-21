@@ -91,11 +91,12 @@ TCC must name **this signed .app** (Developer ID from `config.local`). Cursor as
 
 `click` and `drag` take `global: true`. That is the explicit opt-in to take control, so it deliberately breaks the two default-path rules:
 
-- It raises the target first (`takeControl` → `activate`), because a real-pointer click lands on whatever sits at those coordinates on the **current** Space. The raise is what makes the coordinates mean the target window.
-- It does **not** call `refuseHidOffspace`, so off-Space bounds are not enforced — the raise brings the window to this Space instead.
+- It raises the target first, because a real-pointer click lands on whatever sits at those coordinates on the **current** Space. The raise is what makes the coordinates mean the target window. It raises the **captured** window (`raiseTargetWindow`, matched by `--wid`), not `kAXMainWindowAttribute` — with a secondary window, or one app spread over several Spaces, raising main leaves the target on another Space while the app still reports frontmost.
+- It **verifies before it posts**: `takeControl` returns true only when the app is frontmost *and* the captured window is on this Space, and `click`/`drag` then abort with an error and send nothing. Skipping the off-Space guard is only safe while that check holds; an unverified real-pointer click would hit an unrelated application.
+- It does **not** call `refuseHidOffspace`, so off-Space bounds are not enforced — the raise is what brings the window to this Space.
 - It posts at `.cghidEventTap` (`hidClick` / `hidDrag`), so the user's pointer moves and foreground focus changes.
 
-Why a param and not a separate tool: it is the same click/drag with a different delivery, so it stays one contract. Why not automatic: a silent pointer steal is worse than a no-op, and `AGENTS.md` keeps raise/activate off the default path. The pid path reports `via: pid`, global reports `via: global`, and the server now surfaces the helper's result instead of overwriting it with a bare `ok` — so an agent can see which path ran and escalate deliberately.
+Why a param and not a separate tool: it is the same click/drag with a different delivery, so it stays one contract. Why not automatic: a silent pointer steal is worse than a no-op, and `AGENTS.md` keeps raise/activate off the default path. The pid path reports `via: pid`, global reports `via: global`, and the server surfaces the helper's result instead of overwriting it with a bare `ok` — so an agent can see which path ran and escalate deliberately.
 
 It exists because some native apps (Qt, some AppKit windows) ignore pid-posted mouse events **and** expose no usable AX tree, leaving no non-intrusive way in — the Qt installer was exactly that case.
 

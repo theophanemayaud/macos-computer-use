@@ -623,7 +623,8 @@ TOOLS = {
         "description": (
             "Click an AX element_index (off-Space, no raise), or screenshot x,y posted to that app's pid "
             "(also off-Space; does not move your pointer). Set global=true to force the real-pointer path "
-            "instead: the app is raised first and the mouse actually moves. Use it only as a fallback when "
+            "instead: the captured window is raised first, and if it cannot be brought to this Space the "
+            "call fails without clicking. Use it only as a fallback when "
             "a pid click had no effect (some native apps ignore pid-posted clicks), or when the user "
             "explicitly wants control taken over. The result reports via=pid|hid|global."
         ),
@@ -644,8 +645,9 @@ TOOLS = {
     "drag": {
         "description": (
             "Drag in last screenshot pixel space, posted to the target app pid (no real pointer). "
-            "Set global=true to force the real-pointer path: the app is raised first and the mouse "
-            "actually moves. The pid path cannot drive window-server drags (window moves, text "
+            "Set global=true to force the real-pointer path: the captured window is raised first, and "
+            "if it cannot be brought to this Space the call fails without dragging. The pid path "
+            "cannot drive window-server drags (window moves, text "
             "selection, Finder drag-and-drop), so use global for those. Reports via=pid|global."
         ),
         "schema": {
