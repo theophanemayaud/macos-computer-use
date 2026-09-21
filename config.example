@@ -5,15 +5,17 @@
 # Shell env vars with the same names override this file (CODESIGN_IDENTITY,
 # BUNDLE_ID, …).
 
-BUNDLE_ID='com.example.cursor-desktop'
-APP_DISPLAY_NAME='Cursor Desktop'
-APP_BUNDLE='Cursor Desktop.app'
-EXEC='CursorDesktop'
-SERVER_EXEC='CursorDesktopServer'
+BUNDLE_ID='com.example.macos-computer-use'
+APP_DISPLAY_NAME='Computer Use'
+APP_BUNDLE='Computer Use.app'
+EXEC='ComputerUse'
+SERVER_EXEC='ComputerUseServer'
 # Full keychain identity, e.g. 'Developer ID Application: NAME (TEAMID)'.
 # If empty, build.sh uses the first Developer ID Application, then Apple Development.
 CODESIGN_IDENTITY=''
 # Defaults to BUNDLE_ID.mcp
 LAUNCHD_LABEL=''
 # Unix socket folder under ~/Library/Application Support/ (keep it short; AF_UNIX is ~104 bytes).
-SUPPORT_DIR='cursor-desktop'
+SUPPORT_DIR='computer-use'
+# Space-separated LaunchAgent labels to unload on setup. Optional.
+LEGACY_LAUNCHD_LABELS=''

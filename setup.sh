@@ -10,17 +10,17 @@ cd "$ROOT"
 
 cat <<EOF
 macOS will not let setup silently pre-authorize anything. Enable these
-rows for ${APP_DISPLAY_NAME} (the signed .app, not Cursor):
+rows for ${APP_DISPLAY_NAME} (the signed .app, not your editor):
 
   Required
-    • Accessibilité          — sheet has no Autoriser; toggle in Réglages
-    • Enregistrement de l’écran
+    • Accessibility          — the sheet has no Allow button; toggle it in System Settings
+    • Screen Recording
 
   Not used
-    • Automatisation → System Events
-    • Surveillance des entrées (Input Monitoring)
-    • Accès complet au disque
-    • Gestion des apps / données d’autres apps
+    • Automation → System Events
+    • Input Monitoring
+    • Full Disk Access
+    • App Management / Files and Folders
 
 After toggling, quit leftover ${APP_DISPLAY_NAME} processes if any.
 Grants apply to that one resident helper; MCP talks to it over a unix socket

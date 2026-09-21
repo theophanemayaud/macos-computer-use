@@ -2,7 +2,7 @@
 
 This file is the **tool**: primitives, why they are implemented this way, and macOS facts that constrain them. Setup / TCC / layout: `README.md`. What an agent should know to *use* the MCP: `.agents/skills/computer-use/SKILL.md`.
 
-The agent is not the tool. “Do not capture Cursor / the keyboard / the current Space” is an **implementation** goal for these primitives (Codex shows most drive does not need capture). It is not a rule that chats must never open an app or switch Spaces.
+The agent is not the tool. “Do not capture the editor / the keyboard / the current Space” is an **implementation** goal for these primitives (Codex shows most drive does not need capture). It is not a rule that chats must never open an app or switch Spaces.
 
 ## Goal
 
@@ -10,12 +10,12 @@ Give MCP agents a Codex-like see/click loop on macOS: screenshot + accessibility
 
 | Build | Do not build |
 |---|---|
-| Flexible primitives: list, screenshot+tree, click/type/scroll/keys | Cursor Cloud computer-use; calling or patching `Codex Computer Use.app` |
-| Default paths that do **not** go through Cursor.app, HID, or Mission Control | Virtual cursor, PIP, lock-screen CU, record/replay, Skysight |
-| Accessibility + Screen Recording on **this signed .app** | Granting Accessibility to Cursor.app |
+| Flexible primitives: list, screenshot+tree, click/type/scroll/keys | A cloud-VM computer-use product; calling or patching `Codex Computer Use.app` |
+| Default paths that do **not** go through the editor, HID, or Mission Control | Virtual cursor, PIP, lock-screen CU, record/replay, Skysight |
+| Accessibility + Screen Recording on **this signed .app** | Granting Accessibility to the editor or chat client |
 | `isolate_window` as an explicit raise/fullscreen primitive | System Events / AppleScript GUI scripting; wrapping `open -a` (the shell already does that) |
 
-Unreal **MCP** edits the scene. This stack is pixels and the accessibility tree. GPU views often have an empty tree — then the JPEG is the source of truth.
+This stack is pixels and the accessibility tree. GPU views (games, 3D editors) often have an empty tree — then the JPEG is the source of truth.
 
 ## Agent vs tool
 
@@ -24,16 +24,16 @@ Unreal **MCP** edits the scene. This stack is pixels and the accessibility tree.
 | Window is already open, maybe another Space | Screenshot by window id; click/type via accessibility or pid | Use those primitives; no need to raise |
 | Window is not open | No launch-app tool | `open -g -a "App"` to start without activating; `open -a` if you want it front (may switch Space) |
 | Need the app actually front | `isolate_window` (will come forward; may change Space) | Call it when the task needs a front window, not as politeness |
-| Real mouse on this display | HID, and only if that window is on this Space (otherwise it hits Cursor) | Prefer `element_index`; HID is the wrong primitive off-Space |
+| Real mouse on this display | HID, and only if that window is on this Space (otherwise it hits whatever is front here) | Prefer `element_index`; HID is the wrong primitive off-Space |
 
 ## Approach
 
 ### Process identity
 
-macOS TCC (Accessibilité, Enregistrement de l’écran) attaches to a **signed .app**, not to a random `helper` binary and not to Cursor.
+macOS TCC (Accessibility, Screen Recording) attaches to a **signed .app**, not to a random `helper` binary and not to the editor.
 
 ```
-Cursor  --HTTP :8765-->  MCP server binary (LaunchAgent, inside the signed .app)
+MCP client  --HTTP :8765-->  MCP server binary (LaunchAgent, inside the signed .app)
                               --> node mcp.mjs --> server.py
                                                     --> unix socket
                                                           --> helper executable
@@ -52,8 +52,8 @@ Match Codex Sky’s *window* API, not their extras. Each step is a primitive tha
 2. **Accessibility scroll** — `scroll({ element_index, direction, pages })` on that node (or its nearest scroll area / outline / web area). Page actions if they actually move, else that container’s scrollbar `AXValue`. Pid-wheel only if the AX fingerprint (scrollbar or children) changed. No window-guess HID. `AXScrollToVisible` is a per-element secondary action, not this pager. `click` may `AXScrollToVisible` first if the control’s frame is outside the window.
 3. **Synthetic key for `--wid`** — Codex-style `NSEventTypeAppKitDefined` plus yabai `SLPSPostEventRecordTo`, posted to the pid. **Not** `_SLPSSetFrontProcessWithOptions` (that steals the keyboard even with `kCPSNoWindows`). No undo-if-front-changed: Mail dump/click/type did not flip Space on this path, and restoring whoever was front fights a user who switched during the call.
 4. **Pid-directed CGEvent** — unicode typing, coordinate click/wheel, stamped with the CG window id.
-5. **HID** (`cghidEventTap`) — real pointer, **only** if the target window is on this Space. Off-Space HID would click Cursor.
-6. **`isolate_window`** — raise / fullscreen, and **leave it front**. The capture primitive; keep it out of the default click path.
+5. **HID** (`cghidEventTap`) — real pointer, **only** if the target window is on this Space. Off-Space HID would click whatever is front on this Space.
+6. **`isolate_window`** — raise / fullscreen, and **leave it front**. Raise calls `raiseTargetWindow` so the captured `--wid` comes forward, not whichever window the app treats as main. If that window is missing from the accessibility list, or `AXRaise` fails, or it is neither focused nor on this Space afterwards, the call errors and does not claim success. Keep it out of the default click path.
 
 `type_text` is unicode key events to that pid (optional index to focus first). Native fields can also use `set_value`. After a successful `AXPress`, do not also pid-click that control’s screen point (those coordinates often sit on this Space).
 
@@ -61,7 +61,7 @@ Match Codex Sky’s *window* API, not their extras. Each step is a primitive tha
 
 A screenshot is a **CG window** (`CGWindowID`, bounds, `on_screen` via ScreenCaptureKit). An AX dump is an **AX window** of that pid. They are not the same list.
 
-Picker order: CG window id (`_AXUIElementGetWindow`) → normalized title → bounds. Never silently dump Mail’s focused compose when the screenshot was Envoyés.
+Picker order: CG window id (`_AXUIElementGetWindow`) → normalized title → bounds. Never silently dump Mail’s focused compose when the screenshot was Sent.
 
 ### No server-side anchor (why calls carry `window_id` + `image_px`)
 
@@ -85,7 +85,7 @@ New windows usually appear on the **current** Space (Mail compose, a Settings wi
 | Stable id | `CGWindowID` | `AXUIElement` (Codex uses `_AXUIElementGetWindow`) |
 | Titles | Window name | Often longer, or changes after `set_value` |
 
-Mail only publishes the key/focused window on `AXWindows` until we synthetically key `--wid`. Then Inbox/Envoyés dump that window even if a compose exists elsewhere.
+Mail only publishes the key/focused window on `AXWindows` until we synthetically key `--wid`. Then Inbox/Sent dump that window even if a compose exists elsewhere.
 
 **Menus, sheets, popovers** are overlay windows (CG layer > 0). `list_apps` skips those layers, so the parent can stay `on_screen: false` while `AXPress` on a popup still draws the menu on **this** Space. That is WindowServer. Pid-clicking that overlay’s screen rect aims at pixels the user is looking at and often beeps — hence “AXPress succeeded → do not pid-click.”
 
@@ -93,7 +93,7 @@ Mail only publishes the key/focused window on `AXWindows` until we synthetically
 - `postToPid`: that process only; it still chooses which of its windows is key.
 - Stamping `kCGMouseEventWindowUnderMousePointer` is how Codex aims at a `CGWindowID`. Necessary, not always enough (Mail list / body).
 
-TCC must name **this signed .app** (Developer ID from `config.local`). Cursor as parent of an unsigned helper is how we prompted for Cursor.app — refuse that sheet.
+TCC must name **this signed .app** (Developer ID from `config.local`). The editor as parent of an unsigned helper is how a permission sheet gets aimed at the editor — refuse that sheet.
 
 ### Global (real-pointer) fallback
 
@@ -112,7 +112,7 @@ It exists because some native apps (Qt, some AppKit windows) ignore pid-posted m
 
 ## Current gaps
 
-- Mail, proven without raising Inbox’s Space: tree includes toolbar **Nouveau message**; list select via `AXSelectedRows`; list scroll via scrollbar `AXValue` on the outline’s container (`scroll` requires that `element_index`); compose body `type_text` into the web area; headers `set_value`; discard sheet `AXPress`. Compose still births on the current Space — expected.
+- Mail, proven without raising Inbox’s Space: tree includes the toolbar **New Message** button; list select via `AXSelectedRows`; list scroll via scrollbar `AXValue` on the outline’s container (`scroll` requires that `element_index`); compose body `type_text` into the web area; headers `set_value`; discard sheet `AXPress`. Compose still births on the current Space — expected. Mail’s own labels follow the system language.
 - Closing an **off-Space fullscreen unsaved compose** still brings that Space forward (AppKit save sheet). Windowed compose on this Space does not.
 - Mail list pid-wheel / pid-click often no-ops; `AXScrollDownByPage` often `kAXErrorCannotComplete`. Scrollbar `AXValue` moves pixels. `scroll` without `element_index` is rejected; pid-wheel is not reported `ok` unless children/scrollbar actually moved.
 - WebKit (Safari/Google): pid-wheel still does not page the document. If Safari exposes a window `AXScrollBar`, `scroll` on that scroll area/`element_index` moves via `AXValue` (verified on Forums). `AXScrollToVisible` on a descendant remains the “bring this result into view” action.
@@ -125,14 +125,14 @@ Given `--wid`, `ensureSyntheticKey` posts AppKitDefined subtype 1 / key-focus pl
 
 ## Codex parity
 
-`~/.codex/computer-use/Codex Computer Use.app` and ChatGPT’s `@oai/sky` are a **behavior spec** for drive primitives, never a library from Cursor. Match their window API (AX + screenshot, `element_index`, pid-directed input, no off-Space HID). Do not copy isolation extras or loop sugar.
+`~/.codex/computer-use/Codex Computer Use.app` and ChatGPT’s `@oai/sky` are a **behavior spec** for drive primitives, never a library to call or patch. Match their window API (AX + screenshot, `element_index`, pid-directed input, no off-Space HID). Do not copy isolation extras or loop sugar.
 
 ### Shared drive tools
 
 | Codex | Us | Notes |
 |---|---|---|
 | `list_apps` | Windows + `on_screen` | They list **apps** (running + 14-day usage). We list **windows** so Mail inbox vs compose and other Spaces are distinct. |
-| `get_app_state` | One CG window, full tree + JPEG, no raise | They take the app’s key window, may auto-launch, optional AX diff. We pick by substring / last window. |
+| `get_app_state` | One CG window, full tree + JPEG, no raise | They take the app’s key window, may auto-launch, optional AX diff. We require `app` (owner or title substring) and do not remember a window. |
 | `click` | Index or screenshot x,y | AXPress first; `AXScrollToVisible` if the frame is outside the window; no pid-click after a successful press (overlay coords sit on this Space). |
 | `scroll` | Requires `element_index` + direction + pages | Ancestor scroll area; AX page then scrollbar `AXValue`; pid-wheel only if something moved. No window-guess. |
 | `drag` | Screenshot coords, posted to the pid | Same idea as their synthesized-in-window drag. |

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * MCP for Cursor. Apple python3 stdio re-execs Python.app and Cursor cancels
- * initialize. Local chats use streamable HTTP (--http). Stdio remains for tests.
+ * Streamable HTTP MCP. Apple python3 stdio re-execs Python.app and the client
+ * cancels initialize. Local chats use HTTP (--http). Stdio remains for tests.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -335,7 +335,7 @@ function startHttp() {
       );
     }
   });
-  // Cursor reuses the TCP connection. Node's default keepAliveTimeout is 5s,
+  // Clients reuse the TCP connection. Node's default keepAliveTimeout is 5s,
   // which matches the "connected" then "MCP HTTP exchange failed" gap.
   server.keepAliveTimeout = 900000;
   server.headersTimeout = 910000;

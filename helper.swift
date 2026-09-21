@@ -6,7 +6,8 @@ import Foundation
 import ScreenCaptureKit
 
 /// computer-use helper. JSON on stdout. Not OpenAI / Codex.
-/// Observe never activates. Drive restores the user's front app + pointer unless --activate.
+/// Observe never activates. Click, type, and scroll do not restore the front app.
+/// isolate and --global raise on purpose and leave the target front.
 
 struct WindowInfo: Encodable {
     let id: UInt32
@@ -438,7 +439,7 @@ func targetWindowID() -> CGWindowID {
 }
 
 /// Codex stamps CGEvents with a window id so Mail’s key compose does not eat
-/// events meant for Envoyés (same screen rect, different CGWindowID).
+/// events meant for Sent (same screen rect, different CGWindowID).
 func stampTarget(_ ev: CGEvent, pid: pid_t?) {
     if let pid, pid != 0 {
         ev.setIntegerValueField(.eventTargetUnixProcessID, value: Int64(pid))
@@ -1562,7 +1563,7 @@ func axClickIndex() throws {
         return
     }
     // AXPress already ran. Do not pid-click the element's screen point: that
-    // rect often sits on the current Space (Cursor) when the window is off-Space,
+    // rect often sits on the current Space when the window is off-Space,
     // and AXMenuItem popups are overlay windows on the active Space.
     if via.contains("AXPress") {
         try printJSON(["ok": true, "via": "AXPress", "role": role])
@@ -1868,14 +1869,47 @@ func restoreFocusCmd() throws {
 func isolateCmd() throws {
     guard let pid = optionalPid() else { throw HelperError.usage("isolate --pid N [--mode raise|fullscreen]") }
     let mode = (arg("mode") ?? "raise").lowercased()
-    activate(pid: pid)
+    let wid = targetWindowID()
+    // Activate alone brings the app's main window forward. Require this window
+    // in the accessibility list and a successful AXRaise before activating, so
+    // a missing tree cannot report success after raising a different window.
+    if wid != 0 {
+        let axApp = AXUIElementCreateApplication(pid)
+        axEnableIfNeeded(axApp)
+        guard let win = axCandidateWindows(axApp).first(where: { axCGWindowID($0) == wid }) else {
+            throw HelperError.failed(
+                "isolate aborted: window \(wid) is not in the accessibility window list, "
+                    + "so activating the app would bring a different window forward. Nothing was raised."
+            )
+        }
+        let raiseErr = AXUIElementPerformAction(win, kAXRaiseAction as CFString)
+        if raiseErr != .success {
+            throw HelperError.failed(
+                "isolate aborted: AXRaise on window \(wid) failed (\(raiseErr.rawValue)). Nothing was activated."
+            )
+        }
+    }
+    raiseTargetWindow(pid: pid, windowID: wid)
     usleep(200_000)
+    if wid != 0 {
+        let focused = axFocusedWindowID(pid)
+        if focused != wid && !cgWindowIsOnScreen(wid) {
+            throw HelperError.failed(
+                "isolate aborted: window \(wid) is not focused or on this Space after raise."
+            )
+        }
+    }
     scCache = nil
     scCacheAt = Date.distantPast
     if mode == "fullscreen" {
         try axTrusted()
         let app = AXUIElementCreateApplication(pid)
         let win = axPickWindow(app: app, titleHint: arg("title"))
+        if wid != 0, axCGWindowID(win) != wid {
+            throw HelperError.failed(
+                "isolate aborted: fullscreen would target a different window than \(wid)."
+            )
+        }
         let err = AXUIElementSetAttributeValue(win, "AXFullScreen" as CFString, kCFBooleanTrue as CFBoolean)
         if err != .success {
             throw HelperError.failed("Could not fullscreen (AXFullScreen \(err.rawValue)). Window was still raised.")
@@ -1885,6 +1919,7 @@ func isolateCmd() throws {
         "ok": true,
         "mode": mode,
         "pid": Int(pid),
+        "window_id": Int(wid),
         "stole_focus": true,
         "restored": false,
     ])
@@ -2028,7 +2063,7 @@ func defaultSocketPath() -> String {
     let name =
         (Bundle.main.object(forInfoDictionaryKey: "CuaSupportDir") as? String).flatMap {
             $0.isEmpty ? nil : $0
-        } ?? "cursor-desktop"
+        } ?? "computer-use"
     let dir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/\(name)")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
