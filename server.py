@@ -71,7 +71,6 @@ JPEG_QUALITY = 72
 
 PROTOCOL_VERSION = "2025-11-25"
 
-_last: dict[str, Any] = {}
 _tcc: dict[str, Any] = {}
 _tcc_at = 0.0
 
@@ -321,15 +320,54 @@ def _capture_jpeg(window: dict[str, Any]) -> tuple[bytes, int, int]:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _map_click(x: float, y: float) -> tuple[float, float, dict[str, Any]]:
-    if not _last:
-        raise RuntimeError("Call get_app_state first so click coordinates match the screenshot.")
-    iw = float(_last["image_w"])
-    ih = float(_last["image_h"])
-    win = _last["window"]
-    sx = float(win["x"]) + (float(x) / iw) * float(win["w"])
-    sy = float(win["y"]) + (float(y) / ih) * float(win["h"])
-    return sx, sy, win
+def _window_by_id(wid: int) -> dict[str, Any]:
+    for w in _windows():
+        if int(w.get("id") or 0) == int(wid):
+            return w
+    raise RuntimeError(f"window_id {wid} is not an open window; call get_app_state again.")
+
+
+def _target_window(args: dict[str, Any]) -> dict[str, Any]:
+    """The window a tool acts on, resolved only from the call's own arguments.
+
+    `window_id` (from get_app_state) is preferred; `app` is a stateless fallback
+    that matches against the live window list. Nothing is remembered between
+    calls, so concurrent agents cannot clobber each other's target.
+    """
+    wid = args.get("window_id")
+    if wid is not None:
+        return _window_by_id(int(wid))
+    app = args.get("app")
+    if not (app or "").strip():
+        raise RuntimeError(
+            "pass window_id from get_app_state (or app=) so the target window is explicit; "
+            "the server keeps no state between calls."
+        )
+    return _match_window(app)
+
+
+def _anchor(args: dict[str, Any]) -> tuple[dict[str, Any], float, float]:
+    """Window plus screenshot pixel size, both echoed back by the caller.
+
+    x,y are screenshot pixels, so they only mean anything next to the capture
+    they came from: the window and the image size get_app_state reported.
+    """
+    win = _target_window(args)
+    px = args.get("image_px")
+    if not (isinstance(px, (list, tuple)) and len(px) == 2):
+        raise RuntimeError(
+            "x,y are screenshot pixels: pass window_id and image_px [w,h] from get_app_state "
+            "with the call, instead of relying on server state."
+        )
+    return win, float(px[0]), float(px[1])
+
+
+def _map_click(
+    x: float, y: float, win: dict[str, Any], image_w: float, image_h: float
+) -> tuple[float, float]:
+    sx = float(win["x"]) + (float(x) / image_w) * float(win["w"])
+    sy = float(win["y"]) + (float(y) / image_h) * float(win["h"])
+    return sx, sy
 
 
 def _b64(data: bytes) -> str:
@@ -355,7 +393,7 @@ def tool_list_apps(_args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_isolate_window(args: dict[str, Any]) -> dict[str, Any]:
-    win = _last.get("window") or _match_window(args.get("app"))
+    win = _target_window(args)
     mode = str(args.get("mode") or "raise").lower()
     if mode not in ("raise", "fullscreen"):
         mode = "raise"
@@ -395,8 +433,6 @@ def tool_get_app_state(args: dict[str, Any]) -> dict[str, Any]:
                 win["name"] = m.group(1)
     except Exception as exc:
         ax_err = str(exc)
-    _last.clear()
-    _last.update({"window": win, "image_w": iw, "image_h": ih})
     meta = {
         "app": win["owner"],
         "window": win["name"],
@@ -412,7 +448,10 @@ def tool_get_app_state(args: dict[str, Any]) -> dict[str, Any]:
         "ax_window_ids": ax_window_ids,
         "synthetic_key": synthetic_key,
         "on_screen": win.get("on_screen"),
-        "click_space": "prefer element_index from the AX tree; else screenshot pixels, origin top-left",
+        "click_space": (
+            "prefer element_index from the AX tree; else screenshot pixels, origin top-left. "
+            "Pass window_id and image_px back with click/drag — the server keeps no state."
+        ),
     }
     if ax_err:
         meta["ax_error"] = ax_err
@@ -432,14 +471,12 @@ def tool_get_app_state(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_click(args: dict[str, Any]) -> dict[str, Any]:
-    win = _last.get("window")
     if args.get("global") and args.get("element_index") is not None:
         raise RuntimeError(
             "global click needs x,y: it moves the real pointer, so there is no element_index path"
         )
     if args.get("element_index") is not None:
-        if not win:
-            win = _match_window(args.get("app"))
+        win = _target_window(args)
         cmd = [
             "click",
             "--index",
@@ -453,7 +490,8 @@ def tool_click(args: dict[str, Any]) -> dict[str, Any]:
         return _text(out.strip() or '{"ok":true}')
     if args.get("x") is None or args.get("y") is None:
         raise RuntimeError("click needs element_index (preferred) or x,y screenshot pixels")
-    sx, sy, win = _map_click(args["x"], args["y"])
+    win, iw, ih = _anchor(args)
+    sx, sy = _map_click(args["x"], args["y"], win, iw, ih)
     button = str(args.get("mouse_button") or args.get("button") or "left")
     count = int(args.get("click_count") or args.get("count") or 1)
     cmd = [
@@ -479,10 +517,9 @@ def tool_click(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_drag(args: dict[str, Any]) -> dict[str, Any]:
-    if not _last:
-        raise RuntimeError("Call get_app_state first.")
-    x1, y1, win = _map_click(args["from_x"], args["from_y"])
-    x2, y2, _ = _map_click(args["to_x"], args["to_y"])
+    win, iw, ih = _anchor(args)
+    x1, y1 = _map_click(args["from_x"], args["from_y"], win, iw, ih)
+    x2, y2 = _map_click(args["to_x"], args["to_y"], win, iw, ih)
     cmd = [
         "drag",
         "--from-x",
@@ -508,7 +545,7 @@ def tool_scroll(args: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError(
             "scroll needs element_index from the last AX tree (the list, web area, or a row inside it)."
         )
-    win = _last.get("window") or _match_window(args.get("app"))
+    win = _target_window(args)
     direction = str(args.get("direction") or "down").lower()
     pages = float(args.get("pages") or 1)
     if pages <= 0:
@@ -528,7 +565,7 @@ def tool_scroll(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_type_text(args: dict[str, Any]) -> dict[str, Any]:
-    win = _last.get("window") or _match_window(args.get("app"))
+    win = _target_window(args)
     cmd = ["type", "--text", str(args.get("text") or ""), "--pid", str(int(win["pid"]))] + _ax_win_args(
         win
     )
@@ -538,14 +575,14 @@ def tool_type_text(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_press_key(args: dict[str, Any]) -> dict[str, Any]:
-    win = _last.get("window") or _match_window(args.get("app"))
+    win = _target_window(args)
     spec = str(args.get("key") or "")
     _helper(["key", "--spec", spec, "--pid", str(int(win["pid"]))] + _ax_win_args(win))
     return _text('{"ok":true}')
 
 
 def tool_set_value(args: dict[str, Any]) -> dict[str, Any]:
-    win = _last.get("window") or _match_window(args.get("app"))
+    win = _target_window(args)
     cmd = [
         "set-value",
         "--index",
@@ -559,7 +596,7 @@ def tool_set_value(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tool_perform_secondary_action(args: dict[str, Any]) -> dict[str, Any]:
-    win = _last.get("window") or _match_window(args.get("app"))
+    win = _target_window(args)
     cmd = [
         "ax-action",
         "--index",
@@ -607,12 +644,13 @@ TOOLS = {
     },
     "isolate_window": {
         "description": (
-            "Raise the last captured app (or app=) and optionally fullscreen it. "
+            "Raise the window given by window_id (or app=) and optionally fullscreen it. "
             "This comes to the front and may switch Spaces. Leaves it front."
         ),
         "schema": {
             "type": "object",
             "properties": {
+                "window_id": {"type": "integer"},
                 "app": {"type": "string"},
                 "mode": {"type": "string", "enum": ["raise", "fullscreen"]},
             },
@@ -621,11 +659,13 @@ TOOLS = {
     },
     "click": {
         "description": (
-            "Click an AX element_index (off-Space, no raise), or screenshot x,y posted to that app's pid "
-            "(also off-Space; does not move your pointer). Set global=true to force the real-pointer path "
-            "instead: the app is raised first and the mouse actually moves. Use it only as a fallback when "
-            "a pid click had no effect (some native apps ignore pid-posted clicks), or when the user "
-            "explicitly wants control taken over. The result reports via=pid|hid|global."
+            "Click an AX element_index, or screenshot x,y posted to that window's pid "
+            "(off-Space; does not move your pointer). x,y come from get_app_state, so pass that "
+            "call's window_id and image_px back with them — the server keeps no state. Set "
+            "global=true to force the real-pointer path instead: the window is raised first and "
+            "the mouse actually moves. Use it only as a fallback when a pid click had no effect "
+            "(some native apps ignore pid-posted clicks), or when the user explicitly wants "
+            "control taken over. The result reports via=pid|hid|global."
         ),
         "schema": {
             "type": "object",
@@ -633,6 +673,8 @@ TOOLS = {
                 "element_index": {"type": "integer"},
                 "x": {"type": "number"},
                 "y": {"type": "number"},
+                "window_id": {"type": "integer"},
+                "image_px": {"type": "array", "items": {"type": "integer"}},
                 "app": {"type": "string"},
                 "mouse_button": {"type": "string", "enum": ["left", "right", "middle"]},
                 "click_count": {"type": "integer"},
@@ -643,10 +685,11 @@ TOOLS = {
     },
     "drag": {
         "description": (
-            "Drag in last screenshot pixel space, posted to the target app pid (no real pointer). "
-            "Set global=true to force the real-pointer path: the app is raised first and the mouse "
-            "actually moves. The pid path cannot drive window-server drags (window moves, text "
-            "selection, Finder drag-and-drop), so use global for those. Reports via=pid|global."
+            "Drag in get_app_state's screenshot pixels, posted to the window's pid (no real "
+            "pointer). Pass window_id and image_px from that call; the server keeps no state. "
+            "Set global=true to force the real-pointer path: the window is raised first and the "
+            "mouse actually moves. The pid path cannot drive window-server drags (window moves, "
+            "text selection, Finder drag-and-drop), so use global for those. Reports via=pid|global."
         ),
         "schema": {
             "type": "object",
@@ -655,6 +698,8 @@ TOOLS = {
                 "from_y": {"type": "number"},
                 "to_x": {"type": "number"},
                 "to_y": {"type": "number"},
+                "window_id": {"type": "integer"},
+                "image_px": {"type": "array", "items": {"type": "integer"}},
                 "global": {"type": "boolean"},
             },
             "required": ["from_x", "from_y", "to_x", "to_y"],
@@ -663,7 +708,7 @@ TOOLS = {
     },
     "scroll": {
         "description": (
-            "Scroll an element from the last AX tree by pages (up/down/left/right). "
+            "Scroll an element from the AX tree by pages (up/down/left/right). "
             "Requires element_index (the list, web area, or a row inside it). "
             "Uses AX page-scroll or that container's scrollbar; pid-wheel only if those actually move. "
             "Does not guess a point in the window. WebKit often needs AXScrollToVisible on a descendant instead."
@@ -674,6 +719,7 @@ TOOLS = {
                 "element_index": {"type": "integer"},
                 "direction": {"type": "string"},
                 "pages": {"type": "number"},
+                "window_id": {"type": "integer"},
                 "app": {"type": "string"},
             },
             "required": ["element_index"],
@@ -682,13 +728,14 @@ TOOLS = {
     },
     "type_text": {
         "description": (
-            "Type into the target app like Codex type_text: unicode key events to that pid "
+            "Type into the target window like Codex type_text: unicode key events to that pid "
             "(into current focus, or element_index first). Not a global shortcut."
         ),
         "schema": {
             "type": "object",
             "properties": {
                 "text": {"type": "string"},
+                "window_id": {"type": "integer"},
                 "app": {"type": "string"},
                 "element_index": {"type": "integer"},
             },
@@ -698,13 +745,14 @@ TOOLS = {
     },
     "press_key": {
         "description": (
-            "Key or combo into the target app only (pid-directed, not global). "
+            "Key or combo into the target window only (pid-directed, not global). "
             "Examples: Return, Tab, Escape, cmd+s, Up."
         ),
         "schema": {
             "type": "object",
             "properties": {
                 "key": {"type": "string"},
+                "window_id": {"type": "integer"},
                 "app": {"type": "string"},
             },
             "required": ["key"],
@@ -718,6 +766,7 @@ TOOLS = {
             "properties": {
                 "element_index": {"type": "integer"},
                 "value": {"type": "string"},
+                "window_id": {"type": "integer"},
                 "app": {"type": "string"},
             },
             "required": ["element_index", "value"],
@@ -731,6 +780,7 @@ TOOLS = {
             "properties": {
                 "element_index": {"type": "integer"},
                 "action": {"type": "string"},
+                "window_id": {"type": "integer"},
                 "app": {"type": "string"},
             },
             "required": ["element_index", "action"],

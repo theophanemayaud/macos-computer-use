@@ -25,9 +25,11 @@ There is no launch-app tool. If nothing is running, `open -g -a "App Name"` star
 
 1. `list_apps` if you need to see what exists.
 2. `get_app_state` for the window you will drive.
-3. Act by `element_index`. Recapture when the UI changed.
+3. Act by `element_index`, or by x,y. Recapture when the UI changed.
 
-Screenshot x,y is posted to that app (not a real mouse move) when the window is off this Space. Set `global: true` on `click`/`drag` to force a real-pointer action instead: the app is raised first, so it comes to this Space and the real mouse is used.
+**Every acting call carries its own target.** Pass `window_id` (from `get_app_state`) on `click`, `drag`, `scroll`, `type_text`, `press_key`, `set_value`, `perform_secondary_action` and `isolate_window`; and for x,y also pass that call's `image_px`. The server remembers nothing between calls, so two agents driving the same Mac cannot corrupt each other's target — and an x,y without its `window_id`/`image_px` is rejected rather than silently mapped to someone else's window. `app=` (owner or title substring) is a stateless fallback when you have no window id.
+
+Screenshot x,y is posted to that window's pid (not a real mouse move) even when it is off this Space. Set `global: true` on `click`/`drag` to force a real-pointer action instead: the window is raised first, so it comes to this Space and the real mouse is used.
 
 ## Facts that change which primitive you pick
 
