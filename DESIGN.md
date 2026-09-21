@@ -53,7 +53,7 @@ Match Codex Sky’s *window* API, not their extras. Each step is a primitive tha
 3. **Synthetic key for `--wid`** — Codex-style `NSEventTypeAppKitDefined` plus yabai `SLPSPostEventRecordTo`, posted to the pid. **Not** `_SLPSSetFrontProcessWithOptions` (that steals the keyboard even with `kCPSNoWindows`). No undo-if-front-changed: Mail dump/click/type did not flip Space on this path, and restoring whoever was front fights a user who switched during the call.
 4. **Pid-directed CGEvent** — unicode typing, coordinate click/wheel, stamped with the CG window id.
 5. **HID** (`cghidEventTap`) — real pointer, **only** if the target window is on this Space. Off-Space HID would click whatever is front on this Space.
-6. **`isolate_window`** — raise / fullscreen, and **leave it front**. Raise calls `raiseTargetWindow` so the captured `--wid` comes forward, not whichever window the app treats as main. Keep it out of the default click path.
+6. **`isolate_window`** — raise / fullscreen, and **leave it front**. Raise calls `raiseTargetWindow` so the captured `--wid` comes forward, not whichever window the app treats as main. If that window is missing from the accessibility list, or `AXRaise` fails, or it is neither focused nor on this Space afterwards, the call errors and does not claim success. Keep it out of the default click path.
 
 `type_text` is unicode key events to that pid (optional index to focus first). Native fields can also use `set_value`. After a successful `AXPress`, do not also pid-click that control’s screen point (those coordinates often sit on this Space).
 

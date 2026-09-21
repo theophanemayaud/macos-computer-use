@@ -1870,17 +1870,46 @@ func isolateCmd() throws {
     guard let pid = optionalPid() else { throw HelperError.usage("isolate --pid N [--mode raise|fullscreen]") }
     let mode = (arg("mode") ?? "raise").lowercased()
     let wid = targetWindowID()
-    // Activate alone brings the app's main window forward. AXRaise the captured
-    // window first so a secondary window, or one app on several Spaces, is the
-    // one that comes here.
+    // Activate alone brings the app's main window forward. Require this window
+    // in the accessibility list and a successful AXRaise before activating, so
+    // a missing tree cannot report success after raising a different window.
+    if wid != 0 {
+        let axApp = AXUIElementCreateApplication(pid)
+        axEnableIfNeeded(axApp)
+        guard let win = axCandidateWindows(axApp).first(where: { axCGWindowID($0) == wid }) else {
+            throw HelperError.failed(
+                "isolate aborted: window \(wid) is not in the accessibility window list, "
+                    + "so activating the app would bring a different window forward. Nothing was raised."
+            )
+        }
+        let raiseErr = AXUIElementPerformAction(win, kAXRaiseAction as CFString)
+        if raiseErr != .success {
+            throw HelperError.failed(
+                "isolate aborted: AXRaise on window \(wid) failed (\(raiseErr.rawValue)). Nothing was activated."
+            )
+        }
+    }
     raiseTargetWindow(pid: pid, windowID: wid)
     usleep(200_000)
+    if wid != 0 {
+        let focused = axFocusedWindowID(pid)
+        if focused != wid && !cgWindowIsOnScreen(wid) {
+            throw HelperError.failed(
+                "isolate aborted: window \(wid) is not focused or on this Space after raise."
+            )
+        }
+    }
     scCache = nil
     scCacheAt = Date.distantPast
     if mode == "fullscreen" {
         try axTrusted()
         let app = AXUIElementCreateApplication(pid)
         let win = axPickWindow(app: app, titleHint: arg("title"))
+        if wid != 0, axCGWindowID(win) != wid {
+            throw HelperError.failed(
+                "isolate aborted: fullscreen would target a different window than \(wid)."
+            )
+        }
         let err = AXUIElementSetAttributeValue(win, "AXFullScreen" as CFString, kCFBooleanTrue as CFBoolean)
         if err != .success {
             throw HelperError.failed("Could not fullscreen (AXFullScreen \(err.rawValue)). Window was still raised.")

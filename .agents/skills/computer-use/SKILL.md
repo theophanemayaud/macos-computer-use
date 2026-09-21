@@ -16,7 +16,7 @@ MCP `computer-use` talks to a **signed helper .app** on macOS. It is a set of pr
 | `get_app_state`                                                                           | Picture + numbered controls for one window. `app` (owner or title substring) is required. Does not raise it |
 | `click` / `scroll` / `type_text` / `press_key` / `set_value` / `perform_secondary_action` | Drive that window. Prefer `element_index` from the last tree. No start/stop session              |
 | `click` / `drag` with `global: true`                                                      | Fallback that takes control: raises the app and moves the real mouse. Last resort, not default   |
-| `isolate_window`                                                                          | Raise that window, or fullscreen it. This **does** come to the front and may change Space; it stays front |
+| `isolate_window`                                                                          | Raise that window, or fullscreen it. Errors if that window cannot be raised. This **does** come to the front and may change Space; it stays front |
 
 
 There is no launch-app tool. If nothing is running, `open -g -a "App Name"` starts it **without** bringing it forward (you stay on this Space). Plain `open -a` activates the app and macOS will switch to that app’s Space if it already has a window there.
