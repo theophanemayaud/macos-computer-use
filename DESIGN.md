@@ -63,6 +63,14 @@ A screenshot is a **CG window** (`CGWindowID`, bounds, `on_screen` via ScreenCap
 
 Picker order: CG window id (`_AXUIElementGetWindow`) → normalized title → bounds. Never silently dump Mail’s focused compose when the screenshot was Envoyés.
 
+### No server-side anchor (why calls carry `window_id` + `image_px`)
+
+x,y are pixels in a **specific** `get_app_state` screenshot, so they only mean anything next to the capture they came from. The server therefore remembers nothing between calls: `click`/`drag` take `window_id` and `image_px` from that call, and every window-targeting tool takes `window_id` (or `app=` as a stateless fallback matched against the live window list).
+
+This replaces an earlier `_last` module global that cached the last captured window. `_last` assumed one client acting sequentially, but the MCP server is a single process serving every session, so two agents driving the same Mac clobbered each other's target: an x,y would be mapped against whichever window the *other* agent captured last, and land somewhere else. Now a missing anchor is a loud error instead of a silent wrong click.
+
+It is also the direction the protocol is going. Our transport is still `2025-11-25` (init handshake, `Mcp-Session-Id`), but the current revision `2026-07-28` removed protocol-level sessions outright — a server on it "MUST NOT mint or echo session IDs". Keying state per session would therefore have been a dead end; per-call arguments survive the move.
+
 ## macOS facts (constrain the tool)
 
 `activate` / `open -a` / `AXRaise` bring that app’s Space forward. The helper’s default click path must not do those. `open -g -a` launches without activating.
