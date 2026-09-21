@@ -15,6 +15,7 @@ MCP `computer-use` talks to a **signed helper .app** on macOS. It is a set of pr
 | `list_apps`                                                                               | Windows, including other Spaces. `on_screen: false` = other Space or fully covered               |
 | `get_app_state`                                                                           | Picture + numbered controls for one window (`app` = owner or title substring). Does not raise it |
 | `click` / `scroll` / `type_text` / `press_key` / `set_value` / `perform_secondary_action` | Drive that window. Prefer `element_index` from the last tree. No start/stop session              |
+| `click` / `drag` with `global: true`                                                      | Fallback that takes control: raises the app and moves the real mouse. Last resort, not default   |
 | `isolate_window`                                                                          | Raise or fullscreen. This **does** come to the front and may change Space; it stays front        |
 
 
@@ -26,12 +27,13 @@ There is no launch-app tool. If nothing is running, `open -g -a "App Name"` star
 2. `get_app_state` for the window you will drive.
 3. Act by `element_index`. Recapture when the UI changed.
 
-Screenshot x,y is posted to that app (not a real mouse move) when the window is off this Space. A real pointer click is only used if the window is actually on this Space — otherwise it would hit whatever you are looking at.
+Screenshot x,y is posted to that app (not a real mouse move) when the window is off this Space. Set `global: true` on `click`/`drag` to force a real-pointer action instead: the app is raised first, so it comes to this Space and the real mouse is used.
 
 ## Facts that change which primitive you pick
 
 - **Two lists.** The picture is a window id; the tree is what that app exposes. Recapture the window you mean.
 - **New windows appear on the current Space.** Drive that window or close it.
+- **Nothing happened?** Some native apps (Qt, some AppKit windows) ignore pid-posted clicks and expose no usable AX tree, so both `element_index` and x,y clicks can silently no-op. If a `click`/`drag` had no effect, retry the same coordinates with `global: true` — that raises the app and uses the real mouse. Use it as a **fallback**, or when the user explicitly wants control taken over. The result's `via` says which path ran (`pid` / `hid` / `global`).
 - **List rows** often have no button action. Selecting the row is what works.
 - `scroll` **needs** `element_index` (the list, scroll area, web area, or a row inside it). If paging cannot move the view, `perform_secondary_action` `AXScrollToVisible` brings a node already in the tree into sight.
 - **Text:** `set_value` for real fields. For a web area, click it then `type_text`.

@@ -87,6 +87,20 @@ Mail only publishes the key/focused window on `AXWindows` until we synthetically
 
 TCC must name **this signed .app** (Developer ID from `config.local`). Cursor as parent of an unsigned helper is how we prompted for Cursor.app — refuse that sheet.
 
+### Global (real-pointer) fallback
+
+`click` and `drag` take `global: true`. That is the explicit opt-in to take control, so it deliberately breaks the two default-path rules:
+
+- It raises the target first (`takeControl` → `activate`), because a real-pointer click lands on whatever sits at those coordinates on the **current** Space. The raise is what makes the coordinates mean the target window.
+- It does **not** call `refuseHidOffspace`, so off-Space bounds are not enforced — the raise brings the window to this Space instead.
+- It posts at `.cghidEventTap` (`hidClick` / `hidDrag`), so the user's pointer moves and foreground focus changes.
+
+Why a param and not a separate tool: it is the same click/drag with a different delivery, so it stays one contract. Why not automatic: a silent pointer steal is worse than a no-op, and `AGENTS.md` keeps raise/activate off the default path. The pid path reports `via: pid`, global reports `via: global`, and the server now surfaces the helper's result instead of overwriting it with a bare `ok` — so an agent can see which path ran and escalate deliberately.
+
+It exists because some native apps (Qt, some AppKit windows) ignore pid-posted mouse events **and** expose no usable AX tree, leaving no non-intrusive way in — the Qt installer was exactly that case.
+
+`scroll` has no global variant yet: `hidScroll` exists but is unused, and the `scroll` CLI path is AX-only and requires `--pid` + `--index`.
+
 ## Current gaps
 
 - Mail, proven without raising Inbox’s Space: tree includes toolbar **Nouveau message**; list select via `AXSelectedRows`; list scroll via scrollbar `AXValue` on the outline’s container (`scroll` requires that `element_index`); compose body `type_text` into the web area; headers `set_value`; discard sheet `AXPress`. Compose still births on the current Space — expected.
@@ -118,6 +132,7 @@ Given `--wid`, `ensureSyntheticKey` posts AppKitDefined subtype 1 / key-focus pl
 | `type_text` | Unicode keys to that pid | Optional index to focus first. Not clipboard paste. |
 | `press_key` | Pid-directed, `cmd`/`super` | xdotool-style. |
 | *(PIP / session raise)* | `isolate_window` | Explicit raise/fullscreen; leaves the app front. Not on the default click path. |
+| *(global pointer fallback)* | `click` / `drag` `global: true` | Their `click_method=global` / `OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS`, simplified to one explicit param: raises first, moves the real pointer. |
 
 ### Intentionally not copied
 

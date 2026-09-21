@@ -68,6 +68,14 @@ func wantsActivate() -> Bool {
     flag("activate")
 }
 
+/// `--global` forces the real-pointer path for click/drag. It is the explicit
+/// opt-in to take control, so it bypasses the pid-directed path entirely: the
+/// pointer moves, the target app is raised first, and off-Space bounds are not
+/// enforced (the raise is what brings the window to the current Space).
+func wantsGlobal() -> Bool {
+    flag("global")
+}
+
 func keepTargetFront() -> Bool {
     flag("keep-target-front")
 }
@@ -383,6 +391,24 @@ func maybeActivate(pid: pid_t?) {
     guard wantsActivate(), let pid else { return }
     activate(pid: pid)
     usleep(80_000)
+}
+
+/// Raise the target before a global (real-pointer) action. Global must own the
+/// screen, so unlike `maybeActivate` this does not wait for `--activate`:
+/// `--global` is itself the explicit opt-in to take control.
+/// 200ms matches `isolateCmd`; a shorter wait let the click fire before the
+/// window was frontmost, so the first click only activated it.
+func takeControl(pid: pid_t?) {
+    guard let pid, pid != 0 else { return }
+    activate(pid: pid)
+    usleep(200_000)
+}
+
+/// Whether `pid` is frontmost right now — used to report a global action
+/// honestly instead of claiming a raise that may not have happened.
+func tookFront(pid: pid_t?) -> Bool {
+    guard let pid, pid != 0 else { return false }
+    return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
 }
 
 func targetWindowID() -> CGWindowID {
@@ -783,6 +809,13 @@ func hidClick(x: Double, y: Double, button: String, count: Int, pid: pid_t?) {
 }
 
 func click(x: Double, y: Double, button: String, count: Int, pid: pid_t?) throws {
+    if wantsGlobal() {
+        takeControl(pid: pid)
+        let raised = tookFront(pid: pid)
+        hidClick(x: x, y: y, button: button, count: count, pid: pid)
+        try printJSON(["ok": true, "via": "global", "raised": raised])
+        return
+    }
     if let pid, pid != 0 {
         ensureSyntheticKey(pid: pid)
         pidClick(x: x, y: y, button: button, count: count, pid: pid)
@@ -794,10 +827,31 @@ func click(x: Double, y: Double, button: String, count: Int, pid: pid_t?) throws
     try printJSON(["ok": true, "via": "hid"])
 }
 
+/// Real-pointer drag at `.cghidEventTap`. Shared by the no-pid path and `--global`.
+func hidDrag(from start: CGPoint, to end: CGPoint) {
+    let steps = 12
+    makeMouseEvent(.leftMouseDown, start, button: .left)?.post(tap: .cghidEventTap)
+    usleep(20_000)
+    for i in 1...steps {
+        let t = Double(i) / Double(steps)
+        let p = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+        makeMouseEvent(.leftMouseDragged, p, button: .left)?.post(tap: .cghidEventTap)
+        usleep(8_000)
+    }
+    makeMouseEvent(.leftMouseUp, end, button: .left)?.post(tap: .cghidEventTap)
+}
+
 func drag(fromX: Double, fromY: Double, toX: Double, toY: Double, pid: pid_t?) throws {
     let start = CGPoint(x: fromX, y: fromY)
     let end = CGPoint(x: toX, y: toY)
     let steps = 12
+    if wantsGlobal() {
+        takeControl(pid: pid)
+        let raised = tookFront(pid: pid)
+        hidDrag(from: start, to: end)
+        try printJSON(["ok": true, "via": "global", "raised": raised])
+        return
+    }
     if let pid, pid != 0 {
         ensureSyntheticKey(pid: pid)
         postMouse(.leftMouseDown, start, button: .left, clickCount: 1, pid: pid)
@@ -814,15 +868,7 @@ func drag(fromX: Double, fromY: Double, toX: Double, toY: Double, pid: pid_t?) t
     }
     try refuseHidOffspace(pid: pid)
     maybeActivate(pid: pid)
-    makeMouseEvent(.leftMouseDown, start, button: .left)?.post(tap: .cghidEventTap)
-    usleep(20_000)
-    for i in 1...steps {
-        let t = Double(i) / Double(steps)
-        let p = CGPoint(x: fromX + (toX - fromX) * t, y: fromY + (toY - fromY) * t)
-        makeMouseEvent(.leftMouseDragged, p, button: .left)?.post(tap: .cghidEventTap)
-        usleep(8_000)
-    }
-    makeMouseEvent(.leftMouseUp, end, button: .left)?.post(tap: .cghidEventTap)
+    hidDrag(from: start, to: end)
     try printJSON(["ok": true, "via": "hid"])
 }
 
