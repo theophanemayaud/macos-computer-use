@@ -6,7 +6,8 @@ import Foundation
 import ScreenCaptureKit
 
 /// computer-use helper. JSON on stdout. Not OpenAI / Codex.
-/// Observe never activates. Drive restores the user's front app + pointer unless --activate.
+/// Observe never activates. Click, type, and scroll do not restore the front app.
+/// isolate and --global raise on purpose and leave the target front.
 
 struct WindowInfo: Encodable {
     let id: UInt32
@@ -438,7 +439,7 @@ func targetWindowID() -> CGWindowID {
 }
 
 /// Codex stamps CGEvents with a window id so Mail’s key compose does not eat
-/// events meant for Envoyés (same screen rect, different CGWindowID).
+/// events meant for Sent (same screen rect, different CGWindowID).
 func stampTarget(_ ev: CGEvent, pid: pid_t?) {
     if let pid, pid != 0 {
         ev.setIntegerValueField(.eventTargetUnixProcessID, value: Int64(pid))
@@ -1562,7 +1563,7 @@ func axClickIndex() throws {
         return
     }
     // AXPress already ran. Do not pid-click the element's screen point: that
-    // rect often sits on the current Space (Cursor) when the window is off-Space,
+    // rect often sits on the current Space when the window is off-Space,
     // and AXMenuItem popups are overlay windows on the active Space.
     if via.contains("AXPress") {
         try printJSON(["ok": true, "via": "AXPress", "role": role])
@@ -1868,7 +1869,11 @@ func restoreFocusCmd() throws {
 func isolateCmd() throws {
     guard let pid = optionalPid() else { throw HelperError.usage("isolate --pid N [--mode raise|fullscreen]") }
     let mode = (arg("mode") ?? "raise").lowercased()
-    activate(pid: pid)
+    let wid = targetWindowID()
+    // Activate alone brings the app's main window forward. AXRaise the captured
+    // window first so a secondary window, or one app on several Spaces, is the
+    // one that comes here.
+    raiseTargetWindow(pid: pid, windowID: wid)
     usleep(200_000)
     scCache = nil
     scCacheAt = Date.distantPast
@@ -1885,6 +1890,7 @@ func isolateCmd() throws {
         "ok": true,
         "mode": mode,
         "pid": Int(pid),
+        "window_id": Int(wid),
         "stole_focus": true,
         "restored": false,
     ])
@@ -2028,7 +2034,7 @@ func defaultSocketPath() -> String {
     let name =
         (Bundle.main.object(forInfoDictionaryKey: "CuaSupportDir") as? String).flatMap {
             $0.isEmpty ? nil : $0
-        } ?? "cursor-desktop"
+        } ?? "computer-use"
     let dir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/\(name)")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

@@ -51,12 +51,12 @@ def _load_identity() -> dict[str, str]:
             cfg[key] = os.environ[key]
     if not cfg.get("BUNDLE_ID") or not cfg.get("APP_BUNDLE") or not cfg.get("EXEC"):
         raise RuntimeError("Missing config.local. Copy config.example to config.local.")
-    cfg.setdefault("APP_DISPLAY_NAME", "cursor-desktop")
+    cfg.setdefault("APP_DISPLAY_NAME", "Computer Use")
     cfg.setdefault("SERVER_EXEC", cfg["EXEC"] + "Server")
     cfg.setdefault("LAUNCHD_LABEL", cfg["BUNDLE_ID"] + ".mcp")
-    cfg.setdefault("SUPPORT_DIR", "cursor-desktop")
+    cfg.setdefault("SUPPORT_DIR", "computer-use")
     if not cfg.get("SUPPORT_DIR"):
-        cfg["SUPPORT_DIR"] = "cursor-desktop"
+        cfg["SUPPORT_DIR"] = "computer-use"
     return cfg
 
 
@@ -125,7 +125,7 @@ def _ensure_daemon() -> None:
 
 
 def _helper(args: list[str], timeout: float = 12.0) -> str:
-    """Talk to the one resident helper. TCC attaches to our .app, not Cursor."""
+    """Talk to the one resident helper. TCC attaches to our .app, not the editor."""
     _ensure_daemon()
     argv = list(args)
     payload = (json.dumps({"argv": argv}) + "\n").encode("utf-8")
@@ -161,38 +161,40 @@ def _windows() -> list[dict[str, Any]]:
 
 
 def _match_window(app: str | None) -> dict[str, Any]:
+    query = (app or "").strip().lower()
+    if not query:
+        raise RuntimeError(
+            "pass app= (owner or title substring); the server keeps no state and will not guess a window."
+        )
     wins = _windows()
     if not wins:
         raise RuntimeError("No on-screen windows. Screen Recording may be denied for this process.")
-    query = (app or "").strip().lower()
-    if query:
-        scored: list[tuple[int, dict[str, Any]]] = []
-        for w in wins:
-            owner = (w.get("owner") or "").lower()
-            name = (w.get("name") or "").lower()
-            blob = f"{owner} {name}"
-            score = 0
-            if query in owner:
-                score += 30
-            if query in name:
-                score += 20
-            if query in blob:
-                score += 5
-            if any(m in name for m in ("nouveau message", "new message")) and not any(
-                m in query for m in ("nouveau", "new message")
-            ):
-                score -= 18
-            area = int(w.get("w") or 0) * int(w.get("h") or 0)
-            if score:
-                scored.append((score * 10_000_000 + area, w))
-        if not scored:
-            owners = sorted({w.get("owner") or "?" for w in wins})
-            raise RuntimeError(f"No window matching {query!r}. Visible owners: {', '.join(owners)}")
-        scored.sort(key=lambda t: t[0], reverse=True)
-        return scored[0][1]
-    others = [w for w in wins if (w.get("owner") or "").lower() != "cursor"]
-    pool = others or wins
-    return max(pool, key=lambda w: int(w.get("w") or 0) * int(w.get("h") or 0))
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for w in wins:
+        owner = (w.get("owner") or "").lower()
+        name = (w.get("name") or "").lower()
+        blob = f"{owner} {name}"
+        score = 0
+        if query in owner:
+            score += 30
+        if query in name:
+            score += 20
+        if query in blob:
+            score += 5
+        # Mail's compose title follows the system language. Don't prefer it
+        # unless the query asked for a new message.
+        if any(m in name for m in ("nouveau message", "new message")) and not any(
+            m in query for m in ("nouveau", "new message")
+        ):
+            score -= 18
+        area = int(w.get("w") or 0) * int(w.get("h") or 0)
+        if score:
+            scored.append((score * 10_000_000 + area, w))
+    if not scored:
+        owners = sorted({w.get("owner") or "?" for w in wins})
+        raise RuntimeError(f"No window matching {query!r}. Visible owners: {', '.join(owners)}")
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return scored[0][1]
 
 
 def _ax_win_args(win: dict[str, Any]) -> list[str]:
@@ -216,7 +218,7 @@ def _ax_win_args(win: dict[str, Any]) -> list[str]:
 
 
 def _capture_jpeg_fallback(window: dict[str, Any], dest_jpg: str) -> tuple[int, int]:
-    """Cursor-parent screencapture. Used only while the .app's own Screen Recording preflight is false."""
+    """Parent-process screencapture. Used only while the .app's own Screen Recording preflight is false."""
     png = dest_jpg + ".png"
     wid = int(window.get("id") or 0)
     if wid:
@@ -235,7 +237,7 @@ def _capture_jpeg_fallback(window: dict[str, Any], dest_jpg: str) -> tuple[int, 
     proc = subprocess.run(cmd, capture_output=True, timeout=8)
     if proc.returncode != 0 or not os.path.isfile(png) or os.path.getsize(png) < 32:
         raise RuntimeError(
-            "Screenshot failed for both the helper app and Cursor-parent screencapture. "
+            "Screenshot failed for both the helper app and parent-process screencapture. "
             f"Toggle Screen Recording off/on for {APP_DISPLAY_NAME}, then quit its helper once."
         )
     subprocess.run(
@@ -275,7 +277,7 @@ def _helper_screen_ok() -> bool:
 
 
 def _capture_jpeg(window: dict[str, Any]) -> tuple[bytes, int, int]:
-    tmp = tempfile.mkdtemp(prefix="cursor-custom-computer-use-")
+    tmp = tempfile.mkdtemp(prefix="computer-use-")
     try:
         out = os.path.join(tmp, "view.jpg")
         if _helper_screen_ok():
@@ -313,7 +315,7 @@ def _capture_jpeg(window: dict[str, Any]) -> tuple[bytes, int, int]:
         data = open(out, "rb").read()
         if len(data) < 32:
             raise RuntimeError(
-                "Screenshot empty. Cursor-parent screencapture failed; helper Screen Recording is still false."
+                "Screenshot empty. Parent-process screencapture failed; helper Screen Recording is still false."
             )
         return data, w, h
     finally:
@@ -461,7 +463,7 @@ def tool_get_app_state(args: dict[str, Any]) -> dict[str, Any]:
     elif ax_err:
         text_parts.append(f"(no AX tree: {ax_err})")
     else:
-        text_parts.append("(empty AX tree — use the screenshot; common for GPU views like Unreal)")
+        text_parts.append("(empty AX tree — use the screenshot; common for GPU views such as games and 3D editors)")
     return {
         "content": [
             {"type": "text", "text": "\n".join(text_parts)},
@@ -636,9 +638,10 @@ TOOLS = {
             "properties": {
                 "app": {
                     "type": "string",
-                    "description": "Window owner or title substring, e.g. Mail or UnrealEditor.",
+                    "description": "Window owner or title substring, e.g. Mail or TextEdit.",
                 }
             },
+            "required": ["app"],
         },
         "fn": tool_get_app_state,
     },
@@ -919,7 +922,7 @@ def main() -> int:
 
 
 def rpc_main() -> int:
-    """NDJSON tool worker. Stdio MCP is mcp.mjs — Apple python3 becomes Python.app and drops Cursor's pipe."""
+    """NDJSON tool worker. Stdio MCP is mcp.mjs — Apple python3 becomes Python.app and drops the client's pipe."""
     try:
         with open("/tmp/cua-mcp-debug.log", "a", encoding="utf-8") as dbg:
             dbg.write(f"rpc pid={os.getpid()} py={sys.executable}\n")

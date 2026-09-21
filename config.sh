@@ -48,8 +48,9 @@ load_identity() {
     LAUNCHD_LABEL="${BUNDLE_ID}.mcp"
   fi
   if [ -z "${SUPPORT_DIR}" ]; then
-    SUPPORT_DIR="cursor-desktop"
+    SUPPORT_DIR="computer-use"
   fi
+  LEGACY_LAUNCHD_LABELS="${LEGACY_LAUNCHD_LABELS-}"
   MCP_BUNDLE_ID="${BUNDLE_ID}.mcp"
   APP="$ROOT/$APP_BUNDLE"
   HELPER="$APP/Contents/MacOS/$EXEC"

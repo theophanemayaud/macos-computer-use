@@ -31,9 +31,9 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Captures a window so Cursor agents can see the GUI.</string>
+	<string>Captures a window so an agent can see the GUI.</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>Reads the accessibility tree so Cursor agents can see and operate app UI.</string>
+	<string>Reads the accessibility tree so an agent can see and operate app UI.</string>
 	<key>CuaSupportDir</key>
 	<string>__SUPPORT_DIR__</string>
 </dict>

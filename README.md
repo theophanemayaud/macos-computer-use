@@ -40,9 +40,9 @@ macOS binds Accessibility and Screen Recording to the **signed .app**. `setup.sh
 
 | Pane                                                 | Need     |
 | ---------------------------------------------------- | -------- |
-| Accessibilité                                        | Required |
-| Enregistrement de l’écran                            | Required |
-| Automatisation / Input Monitoring / Full Disk Access | Not used |
+| Accessibility                                        | Required |
+| Screen Recording                                     | Required |
+| Automation / Input Monitoring / Full Disk Access     | Not used |
 
 ## Project layout
 
